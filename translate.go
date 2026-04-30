@@ -102,15 +102,12 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 			if text == "" {
 				continue
 			}
-			events = append(events, makeEvent(sessionID, msg.EventThinking, rawMsg, func(e *msg.Event) {
-				e.Thinking = &msg.ThinkingEvent{Text: text}
-			}))
-			events = append(events, makeEvent(sessionID, msg.EventStream, rawMsg, func(e *msg.Event) {
-				e.Stream = &msg.HarnessStream{
-					Delta: &msg.BlockDelta{
-						Index:    i,
-						Type:     msg.DeltaThinking,
-						Thinking: text,
+			events = append(events, makeEvent(sessionID, msg.EventBlock, rawMsg, func(e *msg.Event) {
+				e.Block = &msg.BlockEvent{
+					Index: i,
+					Block: &msg.ContentBlock{
+						Type:     msg.BlockThinking,
+						Thinking: &msg.ThinkingBlock{Text: text},
 					},
 				}
 			}))
@@ -133,14 +130,17 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 			if block.Text == "" {
 				continue
 			}
-			events = append(events, makeEvent(sessionID, msg.EventStream, rawMsg, func(e *msg.Event) {
-				e.Stream = &msg.HarnessStream{
-					Delta: &msg.BlockDelta{
-						Index: i,
-						Type:  msg.DeltaText,
-						Text:  block.Text,
+			if isHiddenOutbound(block.Text) {
+				continue
+			}
+			text := block.Text
+			events = append(events, makeEvent(sessionID, msg.EventBlock, rawMsg, func(e *msg.Event) {
+				e.Block = &msg.BlockEvent{
+					Index: i,
+					Block: &msg.ContentBlock{
+						Type: msg.BlockText,
+						Text: &msg.TextBlock{Text: text},
 					},
-					Hidden: isHiddenOutbound(block.Text),
 				}
 			}))
 		}
