@@ -210,14 +210,15 @@ func isHiddenOutbound(text string) bool {
 	return false
 }
 
-// makeEvent builds a canonical msg.Event with common fields set.
+// makeEvent builds a canonical msg.Event with common fields set. sessionID
+// here is the harness-native id (OpenClaw session id from the JSONL file).
 func makeEvent(sessionID string, eventType msg.EventType, raw json.RawMessage, fill func(*msg.Event)) msg.Event {
 	e := msg.Event{
-		Type:      eventType,
-		Harness:   harness,
-		SessionID: sessionID,
-		Timestamp: time.Now(),
-		Raw:       raw,
+		Type:             eventType,
+		Harness:          harness,
+		HarnessSessionID: sessionID,
+		Timestamp:        time.Now(),
+		Raw:              raw,
 	}
 	fill(&e)
 	return e

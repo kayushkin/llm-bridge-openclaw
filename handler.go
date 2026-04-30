@@ -18,6 +18,9 @@ type Request struct {
 
 // StartParams are the parameters for the "start" method.
 type StartParams struct {
+	BridgeSessionID  string `json:"bridge_session_id,omitempty"`
+	HarnessSessionID string `json:"harness_session_id,omitempty"`
+	// Deprecated: use BridgeSessionID + HarnessSessionID.
 	SessionID   string `json:"session_id"`
 	DisplayName string `json:"display_name"`
 	AgentID     string `json:"agent_id"`
@@ -87,7 +90,11 @@ func (h *Harness) HandleRequest(req Request) error {
 
 // handleStart initializes the session and starts tailing the JSONL file.
 func (h *Harness) handleStart(params StartParams) error {
-	h.sessionID = params.SessionID
+	if params.HarnessSessionID != "" {
+		h.sessionID = params.HarnessSessionID
+	} else {
+		h.sessionID = params.SessionID
+	}
 	h.agentID = params.AgentID
 	if h.agentID == "" {
 		h.agentID = "main"
@@ -97,14 +104,14 @@ func (h *Harness) handleStart(params StartParams) error {
 	emitEvent(msg.Event{
 		Type:      msg.EventSessionState,
 		Harness:   harness,
-		SessionID: h.sessionID,
+		HarnessSessionID: h.sessionID,
 		Timestamp: time.Now(),
 		State:     &msg.StateEvent{State: msg.SessionRunning, Previous: msg.SessionIdle},
 	})
 	emitEvent(msg.Event{
 		Type:      msg.EventSystem,
 		Harness:   harness,
-		SessionID: h.sessionID,
+		HarnessSessionID: h.sessionID,
 		Timestamp: time.Now(),
 		System:    &msg.SystemEvent{Subtype: "init", Message: "openclaw_url=" + h.cfg.OpenClawURL + " agent=" + h.agentID},
 	})
@@ -120,7 +127,7 @@ func (h *Harness) handleStart(params StartParams) error {
 			emitEvent(msg.Event{
 				Type:      msg.EventError,
 				Harness:   harness,
-				SessionID: h.sessionID,
+				HarnessSessionID: h.sessionID,
 				Timestamp: time.Now(),
 				Error: &msg.ErrorEvent{
 					Code:    "SEND_ERROR",
@@ -152,7 +159,7 @@ func (h *Harness) handleCompact(params CompactParams) error {
 	emitEvent(msg.Event{
 		Type:      msg.EventSystem,
 		Harness:   harness,
-		SessionID: h.sessionID,
+		HarnessSessionID: h.sessionID,
 		Timestamp: time.Now(),
 		System:    &msg.SystemEvent{Subtype: "compact_ack", Message: "compaction delegated to OpenClaw"},
 	})
