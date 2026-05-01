@@ -17,14 +17,21 @@ import (
 
 // Tailer watches a JSONL session file and emits canonical events via emitEvent.
 type Tailer struct {
-	path      string
-	sessionID string
-	agg       *UsageAggregator
+	path             string
+	bridgeSessionID  string
+	harnessSessionID string
+	agg              *UsageAggregator
 }
 
-// NewTailer creates a tailer for the given JSONL session file.
-func NewTailer(path, sessionID string, agg *UsageAggregator) *Tailer {
-	return &Tailer{path: path, sessionID: sessionID, agg: agg}
+// NewTailer creates a tailer for the given JSONL session file. Both session
+// ids are stamped on every event the tailer emits.
+func NewTailer(path, bridgeSessionID, harnessSessionID string, agg *UsageAggregator) *Tailer {
+	return &Tailer{
+		path:             path,
+		bridgeSessionID:  bridgeSessionID,
+		harnessSessionID: harnessSessionID,
+		agg:              agg,
+	}
 }
 
 // Run tails the JSONL file from the current end, emitting events for new entries.
@@ -32,7 +39,7 @@ func NewTailer(path, sessionID string, agg *UsageAggregator) *Tailer {
 func (t *Tailer) Run(ctx context.Context) {
 	f, err := os.Open(t.path)
 	if err != nil {
-		log.Printf("tail open error for %s: %v", t.sessionID, err)
+		log.Printf("tail open error for %s: %v", t.harnessSessionID, err)
 		return
 	}
 	defer f.Close()
@@ -55,7 +62,7 @@ func (t *Tailer) Run(ctx context.Context) {
 				continue
 			}
 
-			events := translateEntry(line, t.sessionID, t.agg)
+			events := translateEntry(line, t.bridgeSessionID, t.harnessSessionID, t.agg)
 			for _, ev := range events {
 				emitEvent(ev)
 				publishCount++
@@ -64,7 +71,7 @@ func (t *Tailer) Run(ctx context.Context) {
 
 		select {
 		case <-ctx.Done():
-			log.Printf("tailer %s stopped (%d events)", t.sessionID, publishCount)
+			log.Printf("tailer %s stopped (%d events)", t.harnessSessionID, publishCount)
 			return
 		case <-time.After(500 * time.Millisecond):
 		}
@@ -303,7 +310,10 @@ func watchNewSessions(ctx context.Context, openclawDir string, agg *UsageAggrega
 				}
 
 				log.Printf("new session detected: %s (agent=%s, session=%s)", filepath.Base(path), sess.agent, sess.sessionName)
-				t := NewTailer(path, sess.sessionName, agg)
+				// Auto-discovered tailers run outside any bridge-server-driven
+				// session, so BridgeSessionID is empty; HarnessSessionID is
+				// the OpenClaw-side session name (e.g. "main").
+				t := NewTailer(path, "", sess.sessionName, agg)
 				go t.Run(ctx)
 			}
 		}

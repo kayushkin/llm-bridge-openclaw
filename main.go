@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -13,10 +14,14 @@ import (
 
 const version = "0.1.0"
 
-// emitMu guards stdout writes so concurrent goroutines don't interleave JSON lines.
+// emitMu guards writes so concurrent goroutines don't interleave JSON lines.
 var emitMu sync.Mutex
 
-// emitEvent writes a canonical msg.Event as a single NDJSON line to stdout.
+// emitSink receives the NDJSON event stream. Defaults to os.Stdout (the
+// llm-bridge subprocess contract); tests swap it for a captured buffer.
+var emitSink io.Writer = os.Stdout
+
+// emitEvent writes a canonical msg.Event as a single NDJSON line to emitSink.
 func emitEvent(ev any) {
 	emitMu.Lock()
 	defer emitMu.Unlock()
@@ -27,7 +32,7 @@ func emitEvent(ev any) {
 		return
 	}
 	data = append(data, '\n')
-	os.Stdout.Write(data)
+	emitSink.Write(data)
 }
 
 func main() {

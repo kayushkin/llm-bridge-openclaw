@@ -54,7 +54,7 @@ type contentBlock struct {
 }
 
 // translateEntry converts a JSONL entry into canonical msg.Event(s).
-func translateEntry(raw []byte, sessionID string, agg *UsageAggregator) []msg.Event {
+func translateEntry(raw []byte, bridgeSessionID, harnessSessionID string, agg *UsageAggregator) []msg.Event {
 	var entry jsonlEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return nil
@@ -70,15 +70,15 @@ func translateEntry(raw []byte, sessionID string, agg *UsageAggregator) []msg.Ev
 
 	switch m.Role {
 	case "assistant":
-		return translateAssistant(m, sessionID, raw, agg)
+		return translateAssistant(m, bridgeSessionID, harnessSessionID, raw, agg)
 	case "toolResult":
-		return translateToolResult(m, sessionID, raw)
+		return translateToolResult(m, bridgeSessionID, harnessSessionID, raw)
 	default:
 		return nil // skip user messages
 	}
 }
 
-func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *UsageAggregator) []msg.Event {
+func translateAssistant(m jsonlMessage, bridgeSessionID, harnessSessionID string, raw []byte, agg *UsageAggregator) []msg.Event {
 	var blocks []contentBlock
 	if err := json.Unmarshal(m.Content, &blocks); err != nil {
 		return nil
@@ -102,7 +102,7 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 			if text == "" {
 				continue
 			}
-			events = append(events, makeEvent(sessionID, msg.EventBlock, rawMsg, func(e *msg.Event) {
+			events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventBlock, rawMsg, func(e *msg.Event) {
 				e.Block = &msg.BlockEvent{
 					Index: i,
 					Block: &msg.ContentBlock{
@@ -118,7 +118,7 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 			if len(block.Arguments) > 0 {
 				toolInput = block.Arguments
 			}
-			events = append(events, makeEvent(sessionID, msg.EventToolCall, rawMsg, func(e *msg.Event) {
+			events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventToolCall, rawMsg, func(e *msg.Event) {
 				e.ToolCall = &msg.ToolCallEvent{
 					ToolID: block.ID,
 					Name:   block.Name,
@@ -134,7 +134,7 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 				continue
 			}
 			text := block.Text
-			events = append(events, makeEvent(sessionID, msg.EventBlock, rawMsg, func(e *msg.Event) {
+			events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventBlock, rawMsg, func(e *msg.Event) {
 				e.Block = &msg.BlockEvent{
 					Index: i,
 					Block: &msg.ContentBlock{
@@ -158,7 +158,7 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 
 		usage, cost := agg.Finalize(m)
 
-		events = append(events, makeEvent(sessionID, msg.EventResult, rawMsg, func(e *msg.Event) {
+		events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventResult, rawMsg, func(e *msg.Event) {
 			e.Result = &msg.ResultEvent{
 				Text:          resultText,
 				Usage:         usage,
@@ -168,7 +168,7 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 				APICallUsages: agg.APICallUsages(),
 			}
 		}))
-		events = append(events, makeEvent(sessionID, msg.EventSessionState, rawMsg, func(e *msg.Event) {
+		events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventSessionState, rawMsg, func(e *msg.Event) {
 			e.State = &msg.StateEvent{State: msg.SessionIdle, Previous: msg.SessionRunning}
 		}))
 
@@ -178,7 +178,7 @@ func translateAssistant(m jsonlMessage, sessionID string, raw []byte, agg *Usage
 	return events
 }
 
-func translateToolResult(m jsonlMessage, sessionID string, raw []byte) []msg.Event {
+func translateToolResult(m jsonlMessage, bridgeSessionID, harnessSessionID string, raw []byte) []msg.Event {
 	var blocks []contentBlock
 	if err := json.Unmarshal(m.Content, &blocks); err != nil {
 		return nil
@@ -188,7 +188,7 @@ func translateToolResult(m jsonlMessage, sessionID string, raw []byte) []msg.Eve
 	var events []msg.Event
 	for _, block := range blocks {
 		if block.Type == "text" && block.Text != "" {
-			events = append(events, makeEvent(sessionID, msg.EventToolResult, rawMsg, func(e *msg.Event) {
+			events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventToolResult, rawMsg, func(e *msg.Event) {
 				e.ToolResult = &msg.ToolResultEvent{
 					Name:   m.ToolName,
 					Output: truncate(block.Text, 500),
@@ -210,13 +210,16 @@ func isHiddenOutbound(text string) bool {
 	return false
 }
 
-// makeEvent builds a canonical msg.Event with common fields set. sessionID
-// here is the harness-native id (OpenClaw session id from the JSONL file).
-func makeEvent(sessionID string, eventType msg.EventType, raw json.RawMessage, fill func(*msg.Event)) msg.Event {
+// makeEvent builds a canonical msg.Event with both session ids stamped.
+// bridgeSessionID is the caller's stable id; harnessSessionID is the OpenClaw-
+// native id (for openclaw they are equal, since OpenClaw does not surface its
+// own session id back through the OpenAI-compatible REST API).
+func makeEvent(bridgeSessionID, harnessSessionID string, eventType msg.EventType, raw json.RawMessage, fill func(*msg.Event)) msg.Event {
 	e := msg.Event{
 		Type:             eventType,
 		Harness:          harness,
-		HarnessSessionID: sessionID,
+		BridgeSessionID:  bridgeSessionID,
+		HarnessSessionID: harnessSessionID,
 		Timestamp:        time.Now(),
 		Raw:              raw,
 	}
