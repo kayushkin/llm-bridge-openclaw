@@ -41,6 +41,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	// -import-history is part of the conformance contract but not yet
+	// implemented for openclaw. Exit 2 to signal "unsupported" rather than
+	// silently falling through to the JSON-RPC loop, which would otherwise
+	// show up as a false-positive PASS on the conformance dashboard.
+	if len(os.Args) > 1 && os.Args[1] == "-import-history" {
+		fmt.Fprintln(os.Stderr, "llm-bridge-openclaw: -import-history not yet implemented")
+		os.Exit(2)
+	}
+
 	log.SetOutput(os.Stderr)
 	log.SetPrefix("[llm-bridge-openclaw] ")
 
