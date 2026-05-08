@@ -1,6 +1,9 @@
 package main
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 // Config holds environment-based configuration for the harness.
 type Config struct {
@@ -12,9 +15,20 @@ type Config struct {
 func loadConfig() *Config {
 	return &Config{
 		OpenClawURL: envOr("OPENCLAW_URL", "http://127.0.0.1:18789"),
-		OpenClawDir: os.Getenv("OPENCLAW_DIR"),
+		OpenClawDir: envOr("OPENCLAW_DIR", defaultOpenClawDir()),
 		Token:       os.Getenv("OPENCLAW_TOKEN"),
 	}
+}
+
+// defaultOpenClawDir returns ~/.openclaw, the conventional location of the
+// OpenClaw on-disk session store. Returns "" when the home directory cannot
+// be resolved; callers should treat an empty OpenClawDir as "no local store".
+func defaultOpenClawDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".openclaw")
 }
 
 func envOr(key, fallback string) string {

@@ -41,6 +41,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	// -discover walks OPENCLAW_DIR/agents/*/sessions/ and prints a JSON array
+	// of canonical msg.StoredSession to stdout. On any error (dir missing,
+	// malformed sessions.json) it falls back to "[]" — contract-correct
+	// "no discoverable sessions" matches the cline / hermes empty shape.
+	if len(os.Args) > 1 && os.Args[1] == "-discover" {
+		emitDiscover(loadConfig())
+		os.Exit(0)
+	}
+
 	// -import-history is part of the conformance contract but not yet
 	// implemented for openclaw. Exit 2 to signal "unsupported" rather than
 	// silently falling through to the JSON-RPC loop, which would otherwise
