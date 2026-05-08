@@ -168,9 +168,6 @@ func translateAssistant(m jsonlMessage, bridgeSessionID, harnessSessionID string
 				APICallUsages: agg.APICallUsages(),
 			}
 		}))
-		events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventSessionState, rawMsg, func(e *msg.Event) {
-			e.State = &msg.StateEvent{State: msg.SessionIdle, Previous: msg.SessionRunning}
-		}))
 
 		agg.Reset()
 	}

@@ -129,11 +129,6 @@ func (h *Harness) handleStart(params StartParams) error {
 		return fmt.Errorf("fork unsupported")
 	}
 
-	// Emit running state.
-	h.emit(msg.EventSessionState, func(e *msg.Event) {
-		e.State = &msg.StateEvent{State: msg.SessionRunning, Previous: msg.SessionIdle}
-	})
-
 	initSubtype := "init"
 	if params.Resume {
 		initSubtype = "resume"

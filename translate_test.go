@@ -57,7 +57,7 @@ func TestTranslateAssistant_StampsBothIDs(t *testing.T) {
 	events := translateEntry(rawMsg, "bs_2", "h_2", agg)
 
 	if len(events) < 3 {
-		t.Fatalf("expected thinking + text + result + state events, got %d", len(events))
+		t.Fatalf("expected thinking + text + result events, got %d", len(events))
 	}
 	for i, e := range events {
 		if e.BridgeSessionID != "bs_2" {
@@ -78,10 +78,6 @@ func TestTranslateAssistant_StampsBothIDs(t *testing.T) {
 	// Third: result event with the final text
 	if events[2].Type != msg.EventResult || events[2].Result == nil || events[2].Result.Text != "hello" {
 		t.Errorf("events[2] = %+v, want EventResult text=hello", events[2])
-	}
-	// Fourth: state -> idle
-	if events[3].Type != msg.EventSessionState || events[3].State == nil || events[3].State.State != msg.SessionIdle {
-		t.Errorf("events[3] = %+v, want EventSessionState idle", events[3])
 	}
 }
 

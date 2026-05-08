@@ -104,8 +104,8 @@ func TestHandleStartColdStart_StampsBothIDs(t *testing.T) {
 	}
 
 	events := get()
-	if len(events) < 2 {
-		t.Fatalf("expected at least 2 events (state + system), got %d", len(events))
+	if len(events) < 1 {
+		t.Fatalf("expected at least 1 event (system), got %d", len(events))
 	}
 	for i, e := range events {
 		if e.BridgeSessionID != "bs_1" {
@@ -119,11 +119,8 @@ func TestHandleStartColdStart_StampsBothIDs(t *testing.T) {
 		}
 	}
 
-	if events[0].Type != msg.EventSessionState {
-		t.Errorf("first event = %q, want session_state", events[0].Type)
-	}
-	if events[1].Type != msg.EventSystem || events[1].System == nil || events[1].System.Subtype != "init" {
-		t.Errorf("second event = %v, want system{init}", events[1])
+	if events[0].Type != msg.EventSystem || events[0].System == nil || events[0].System.Subtype != "init" {
+		t.Errorf("first event = %v, want system{init}", events[0])
 	}
 }
 
