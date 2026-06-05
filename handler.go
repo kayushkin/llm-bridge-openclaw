@@ -49,9 +49,10 @@ type CompactParams struct {
 //     resolved from params.BridgeSessionID, with params.SessionID as legacy
 //     fallback for callers that have not migrated yet.
 //   - harnessSessionID is the OpenClaw-side id. OpenClaw does not surface its
-//     own session id back through the OpenAI-compatible REST API, so this is
-//     pinned to bridgeSessionID for the lifetime of the harness; downstream
-//     tools can use either id interchangeably.
+//     own session id back through the OpenAI-compatible REST API, so this stays
+//     empty unless a caller explicitly supplies one (resume). It is never
+//     pinned to bridgeSessionID — the server contract rejects a harness id that
+//     equals the bridge id (see resolveHarnessSessionID).
 type Harness struct {
 	cfg              *Config
 	bridgeSessionID  string
@@ -112,7 +113,7 @@ func (h *Harness) HandleRequest(req Request) error {
 //     a fresh chain with no inherited state.
 func (h *Harness) handleStart(params StartParams) error {
 	h.bridgeSessionID = resolveBridgeSessionID(params)
-	h.harnessSessionID = resolveHarnessSessionID(params, h.bridgeSessionID)
+	h.harnessSessionID = resolveHarnessSessionID(params)
 	h.agentID = params.AgentID
 	if h.agentID == "" {
 		h.agentID = "main"
@@ -170,18 +171,18 @@ func resolveBridgeSessionID(p StartParams) string {
 	return p.SessionID
 }
 
-// resolveHarnessSessionID picks HarnessSessionID, falling back to legacy
-// SessionID, then to the resolved bridge session id. OpenClaw does not return
-// its own session id, so the harness side stays pinned to bridgeSessionID
-// when the caller did not specify one.
-func resolveHarnessSessionID(p StartParams, bridgeSessionID string) string {
-	if p.HarnessSessionID != "" {
-		return p.HarnessSessionID
-	}
-	if p.SessionID != "" {
-		return p.SessionID
-	}
-	return bridgeSessionID
+// resolveHarnessSessionID picks the harness-native session id, which OpenClaw
+// does not have — it never surfaces its own id through the OpenAI-compatible
+// API. So the harness slot is populated only when a caller explicitly supplies
+// a HarnessSessionID (e.g. resume); otherwise it stays empty.
+//
+// It must NOT fall back to the legacy SessionID or the bridge session id: the
+// server contract (llm-bridge-server manager.go) treats HarnessSessionID ==
+// BridgeSessionID as a contract violation and discards it, logging loudly on
+// every event. Leaving it empty is the honest representation of "no native id"
+// (single source of truth: an absent value stays absent, not echoed).
+func resolveHarnessSessionID(p StartParams) string {
+	return p.HarnessSessionID
 }
 
 // emit writes a msg.Event with both session ids stamped from the harness.

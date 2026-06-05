@@ -64,19 +64,19 @@ func TestResolveBridgeSessionID(t *testing.T) {
 
 func TestResolveHarnessSessionID(t *testing.T) {
 	cases := []struct {
-		name            string
-		p               StartParams
-		bridgeSessionID string
-		want            string
+		name string
+		p    StartParams
+		want string
 	}{
-		{"harness_session_id wins", StartParams{HarnessSessionID: "h_1", SessionID: "legacy"}, "bs_1", "h_1"},
-		{"legacy session_id fallback", StartParams{SessionID: "legacy"}, "bs_1", "legacy"},
-		{"falls back to bridge id", StartParams{}, "bs_1", "bs_1"},
-		{"all empty", StartParams{}, "", ""},
+		{"explicit harness_session_id wins", StartParams{HarnessSessionID: "h_1", SessionID: "legacy"}, "h_1"},
+		// OpenClaw has no native id, so legacy SessionID does NOT become the
+		// harness id (it is the bridge/routing id) — the harness slot stays empty.
+		{"legacy session_id does not populate harness slot", StartParams{SessionID: "legacy"}, ""},
+		{"empty stays empty (never echoes bridge id)", StartParams{}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := resolveHarnessSessionID(c.p, c.bridgeSessionID); got != c.want {
+			if got := resolveHarnessSessionID(c.p); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
@@ -202,19 +202,22 @@ func TestHandleStart_LegacySessionIDFallback(t *testing.T) {
 		t.Fatalf("handleStart legacy: %v", err)
 	}
 
+	// Legacy SessionID maps to the bridge/routing id only. OpenClaw has no
+	// native harness id, so the harness slot stays empty (it must never echo
+	// the bridge id — the server rejects harness == bridge).
 	if h.bridgeSessionID != "legacy_id" {
 		t.Errorf("h.bridgeSessionID = %q, want legacy_id", h.bridgeSessionID)
 	}
-	if h.harnessSessionID != "legacy_id" {
-		t.Errorf("h.harnessSessionID = %q, want legacy_id (legacy session_id covers both slots)", h.harnessSessionID)
+	if h.harnessSessionID != "" {
+		t.Errorf("h.harnessSessionID = %q, want empty (legacy id is the bridge id, not a native harness id)", h.harnessSessionID)
 	}
 
 	for _, e := range get() {
 		if e.BridgeSessionID != "legacy_id" {
 			t.Errorf("event %s BridgeSessionID = %q, want legacy_id", e.Type, e.BridgeSessionID)
 		}
-		if e.HarnessSessionID != "legacy_id" {
-			t.Errorf("event %s HarnessSessionID = %q, want legacy_id", e.Type, e.HarnessSessionID)
+		if e.HarnessSessionID != "" {
+			t.Errorf("event %s HarnessSessionID = %q, want empty", e.Type, e.HarnessSessionID)
 		}
 	}
 }
