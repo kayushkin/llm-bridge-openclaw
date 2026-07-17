@@ -70,12 +70,23 @@ func sendToOpenClaw(ctx context.Context, cfg *Config, agentID, sessionName, cont
 
 	// Consume the SSE stream to keep the connection alive.
 	// All event publishing comes from the JSONL tailer.
+	//
+	// Match the 10MB line cap the other live SSE readers use (hermes
+	// client.go, kilocode sseclient.go): a single SSE frame above bufio's
+	// 64KB default would otherwise end Scan() indistinguishably from a
+	// closed stream, silently truncating the drain.
 	sseScanner := bufio.NewScanner(resp.Body)
+	sseScanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	for sseScanner.Scan() {
 		line := sseScanner.Text()
 		if strings.HasPrefix(line, "data: [DONE]") {
 			break
 		}
+	}
+	// Fail loud: a swallowed scanner error (an over-cap line, a broken
+	// connection) is otherwise indistinguishable from a clean stream end.
+	if err := sseScanner.Err(); err != nil {
+		log.Printf("SSE stream read error for agent=%s session=%s: %v", agentID, sessionName, err)
 	}
 	log.Printf("SSE stream ended for agent=%s session=%s", agentID, sessionName)
 
