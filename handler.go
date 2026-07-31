@@ -211,12 +211,32 @@ func (h *Harness) handleMessage(params MessageParams) error {
 	return nil
 }
 
-// handleCompact acknowledges a compact request. OpenClaw manages compaction internally.
+// handleCompact refuses a compact request instead of acknowledging one that
+// nothing performs.
+//
+// This used to emit "compaction delegated to OpenClaw" and return nil. Nothing
+// was delegated — the handler wrote nothing to OpenClaw at all — so a caller
+// asking for a compaction was told it had succeeded and got no compaction.
+// A silent no-op reported as a success is worse than an unimplemented method,
+// because the caller has no way to find out.
+//
+// Refusing is the honest answer here rather than a placeholder for a real
+// implementation. The only channel this bridge has into OpenClaw is
+// POST /v1/chat/completions (client.go), the OpenAI-compatible chat surface,
+// which has no compaction operation; the rest is a read-only JSONL tailer.
+// Whether OpenClaw exposes compaction by some other route cannot be settled
+// from this repo — but the bridge does not implement it either way, and that
+// is exactly what this now reports. llm-bridge-hermes refuses for the same
+// reason and is the shape copied here.
 func (h *Harness) handleCompact(params CompactParams) error {
-	h.emit(msg.EventSystem, func(e *msg.Event) {
-		e.System = &msg.SystemEvent{Subtype: "compact_ack", Message: "compaction delegated to OpenClaw"}
+	h.emit(msg.EventError, func(e *msg.Event) {
+		e.Error = &msg.ErrorEvent{
+			Code:      "UNSUPPORTED",
+			Message:   "compact is not implemented for OpenClaw: this bridge drives OpenClaw over the OpenAI-compatible /v1/chat/completions endpoint, which has no compaction operation",
+			Retryable: false,
+		}
 	})
-	return nil
+	return fmt.Errorf("compact unsupported on openclaw")
 }
 
 // handleResume restarts the tailer if it's not running.
