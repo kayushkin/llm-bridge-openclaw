@@ -68,15 +68,9 @@ func main() {
 	cfg := loadConfig()
 	h := NewHarness(cfg)
 
-	// Handle signals for graceful shutdown.
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		sig := <-sigs
-		log.Printf("received %v, shutting down", sig)
-		h.Shutdown()
-		os.Exit(0)
-	}()
+	go watchSignals(h, sigs, func() { os.Exit(0) })
 
 	// Read JSON-RPC requests from llm-bridge on stdin.
 	// ndjson.ReadLine carries no practical line cap and reports an oversized
@@ -117,4 +111,36 @@ func main() {
 	// stdin closed — llm-bridge is done with us.
 	log.Printf("stdin closed, shutting down")
 	h.Shutdown()
+}
+
+// watchSignals runs this bridge's interrupt contract until the signal channel
+// closes: SIGINT cancels the in-flight turn and the session carries on, any
+// other signal shuts the session down.
+//
+// SIGINT used to exit the process, so pressing Stop in a chat killed the whole
+// openclaw session rather than the turn the user wanted to stop.
+//
+// It must be a loop rather than a single read. llm-bridge-server's Stop is a
+// SIGINT and there is no JSON-RPC interrupt method, so a handler that reads one
+// signal honours the first Stop of a session and silently ignores every Stop
+// after it — which is how the same defect hid in aider, forgecode and nanoclaw.
+// It also lives here, out of the goroutine literal it used to be written in,
+// because a handler observable only by dying cannot be tested.
+//
+// terminate is a parameter so a test can watch the shutdown path without the
+// process exiting underneath it.
+func watchSignals(h *Harness, sigs <-chan os.Signal, terminate func()) {
+	for sig := range sigs {
+		if sig == syscall.SIGINT {
+			log.Printf("received %v, cancelling the in-flight turn", sig)
+			if err := h.handleInterrupt(); err != nil {
+				log.Printf("interrupt: %v", err)
+			}
+			continue
+		}
+		log.Printf("received %v, shutting down", sig)
+		h.Shutdown()
+		terminate()
+		return
+	}
 }

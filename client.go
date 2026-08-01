@@ -84,9 +84,17 @@ func sendToOpenClaw(ctx context.Context, cfg *Config, agentID, sessionName, cont
 		}
 	}
 	// Fail loud: a swallowed scanner error (an over-cap line, a broken
-	// connection) is otherwise indistinguishable from a clean stream end.
+	// connection, an interrupted turn) is otherwise indistinguishable from a
+	// clean stream end. Logging it was not enough — this function's return
+	// value is the caller's only signal, so a stream that died mid-turn was
+	// still reported to the harness as a turn that finished. That mattered the
+	// moment an interrupt became possible: cancelling the turn context aborts
+	// the read here, and the caller has to see a cancellation rather than a
+	// completed turn. Scan stops at EOF with a nil Err, so a stream that ends
+	// without [DONE] is still the clean case it always was.
 	if err := sseScanner.Err(); err != nil {
 		log.Printf("SSE stream read error for agent=%s session=%s: %v", agentID, sessionName, err)
+		return fmt.Errorf("sse stream: %w", err)
 	}
 	log.Printf("SSE stream ended for agent=%s session=%s", agentID, sessionName)
 

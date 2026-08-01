@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/kayushkin/llm-bridge/msg"
@@ -62,6 +64,12 @@ type Harness struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	tailer           *Tailer
+
+	// turnCancel cancels the turn currently in flight, and is nil whenever no
+	// turn is running. It is rebuilt per turn by sendMessage and read by
+	// handleInterrupt from the signal goroutine, hence the mutex.
+	turnMu     sync.Mutex
+	turnCancel context.CancelFunc
 }
 
 // NewHarness creates a new harness instance.
@@ -146,15 +154,10 @@ func (h *Harness) handleStart(params StartParams) error {
 		h.startTailer()
 	}
 
-	// Send the initial prompt if provided.
+	// Send the initial prompt if provided. sendMessage emits its own error
+	// event, so there is nothing to report here beyond returning the error.
 	if params.Prompt != "" {
 		if err := h.sendMessage(params.Prompt); err != nil {
-			h.emit(msg.EventError, func(e *msg.Event) {
-				e.Error = &msg.ErrorEvent{
-					Code:    "SEND_ERROR",
-					Message: err.Error(),
-				}
-			})
 			return err
 		}
 	}
@@ -247,11 +250,90 @@ func (h *Harness) handleResume() error {
 	return nil
 }
 
-// sendMessage forwards a message to OpenClaw via the REST API.
+// handleInterrupt cancels the turn currently in flight and leaves everything
+// else running: the harness process, the JSONL tailer, and the OpenClaw session
+// itself. The next message continues the same conversation.
+//
+// This is what Stop means for openclaw. There is no `interrupt` JSON-RPC
+// method to receive — llm-bridge-server's Stop is a SIGINT and nothing else
+// (internal/harness/manager.go Stop → proc.Interrupt), so the signal handler in
+// main.go is this bridge's entire interrupt contract.
+//
+// What an interrupt here does NOT promise is that OpenClaw stops generating.
+// The only outbound channel this bridge has is POST /v1/chat/completions
+// (client.go), so cancelling the turn is a client disconnect; whether OpenClaw
+// abandons the turn on disconnect is OpenClaw's behaviour, not something this
+// repo can assert. Anything it does keep producing still arrives through the
+// JSONL tailer, which runs on the harness root context and is deliberately
+// left alone here — cancelling it would blind the session to its own output.
+func (h *Harness) handleInterrupt() error {
+	h.turnMu.Lock()
+	cancel := h.turnCancel
+	h.turnMu.Unlock()
+
+	if cancel == nil {
+		h.emit(msg.EventSystem, func(e *msg.Event) {
+			e.System = &msg.SystemEvent{Subtype: "interrupt_noop", Message: "no in-flight turn"}
+		})
+		return nil
+	}
+
+	cancel()
+	h.emit(msg.EventSystem, func(e *msg.Event) {
+		e.System = &msg.SystemEvent{Subtype: "interrupt", Message: "turn cancelled"}
+	})
+	return nil
+}
+
+// sendMessage forwards a message to OpenClaw via the REST API and blocks until
+// that turn's SSE stream ends, the turn is interrupted, or the request fails.
+//
+// The request is built from a per-turn context rather than from the harness
+// root, and that is what makes an interrupt possible at all: cancelling the
+// turn context aborts the in-flight POST and its SSE drain while the harness,
+// the tailer and the session survive. Shutdown cancels the root instead and
+// takes the whole session with it.
 func (h *Harness) sendMessage(content string) error {
 	sessionName := "main"
 
-	return sendToOpenClaw(h.ctx, h.cfg, h.agentID, sessionName, content)
+	turnCtx, turnCancel := context.WithCancel(h.ctx)
+	h.turnMu.Lock()
+	h.turnCancel = turnCancel
+	h.turnMu.Unlock()
+	defer func() {
+		turnCancel()
+		h.turnMu.Lock()
+		h.turnCancel = nil
+		h.turnMu.Unlock()
+	}()
+
+	err := sendToOpenClaw(turnCtx, h.cfg, h.agentID, sessionName, content)
+	if err == nil {
+		return nil
+	}
+
+	// An interrupt is a requested outcome rather than a failure, but it still
+	// has to be visible: without an event the transcript shows a turn that
+	// stops mid-flight for no stated reason. Reported separately from a real
+	// send failure so a UI can tell "you stopped this" from "this broke".
+	if errors.Is(err, context.Canceled) {
+		h.emit(msg.EventError, func(e *msg.Event) {
+			e.Error = &msg.ErrorEvent{
+				Code:      "INTERRUPTED",
+				Message:   "turn cancelled",
+				Retryable: false,
+			}
+		})
+		return err
+	}
+
+	h.emit(msg.EventError, func(e *msg.Event) {
+		e.Error = &msg.ErrorEvent{
+			Code:    "SEND_ERROR",
+			Message: err.Error(),
+		}
+	})
+	return err
 }
 
 // startTailer starts the JSONL file tailer in the background.

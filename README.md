@@ -113,18 +113,35 @@ Per-turn token usage is aggregated across all assistant messages in the turn (in
 ## Testing
 
 ```bash
-go build ./...
+go vet ./...
+go test ./...
+scripts/e2e-smoke.sh         # boots, discovers, answers
+scripts/interrupt-smoke.sh   # drives the real binary through the interrupt contract
 ```
 
-There are no unit tests in this module yet. The harness is exercised via end-to-end runs against a real OpenClaw gateway plus the bridge-ui Conformance page.
+`interrupt-smoke.sh` signals the built process the way bridge-server does and
+asserts the session survives it. It needs no OpenClaw: the bridge's only
+outbound channel is `POST /v1/chat/completions`, so it stubs that endpoint with
+a stream that never ends, which is the shape of a long turn.
 
 ## Known Gaps
 
-- **No `interrupt` method**: in-flight turns cannot be cancelled via JSON-RPC; the SSE request runs to completion (or its 10-minute timeout).
+- **No `interrupt` method** — but interrupting works. bridge-server's Stop is a
+  SIGINT, not a JSON-RPC call (`internal/harness/manager.go` Stop →
+  `proc.Interrupt`), and `SendJSONRPC` has no caller anywhere in that repo. So
+  the signal handler is the interrupt contract: SIGINT cancels the in-flight
+  turn's POST and its SSE drain, the harness and the JSONL tailer stay up, and
+  the next message continues the same session. SIGTERM still ends the process.
+  What this cannot promise is that OpenClaw stops generating — the cancel is a
+  client disconnect, and whatever OpenClaw keeps producing still arrives through
+  the tailer.
 - **No system prompt**: `start.system_prompt` is not forwarded — OpenClaw's agent persona/system message is configured server-side.
 - **No `set_model` / `config`**: model selection is determined by the OpenClaw gateway; the request always uses `model: "openclaw"`.
 - **No `discover`**: the source contains `discoverAllSessions` and `listSessions` helpers in `tail.go`, but they are not wired into the JSON-RPC dispatch.
-- **No `fork` translation**: the `fork` field is parsed but not acted on; OpenClaw branches are managed via its own dashboard.
+- **No `fork` translation**: OpenClaw has no session-cloning primitive, so a
+  `start` carrying `fork` is refused with `FORK_UNSUPPORTED` rather than
+  silently starting a fresh chain. OpenClaw branches are managed via its own
+  dashboard.
 - **Single hardcoded session name**: the bridge tails the `main` session for an agent; multi-session-per-agent is not exposed.
 
 ## Part of the llm-bridge ecosystem
