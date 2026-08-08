@@ -40,8 +40,10 @@ Three things inherited from earlier passes of this sweep, all learned expensivel
 Run from anywhere:  python3 scripts/sabotage-truncation.py
 """
 
+import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 
@@ -216,42 +218,78 @@ def restore():
                    cwd=REPO, check=True)
 
 
+# client.go and translate.go hold deliberately broken versions of themselves
+# from the write in the loop below until the next restore, and this script used
+# to have no way out of that window except the ones it chooses to take. A killed
+# run left the mutated file behind as ordinary-looking uncommitted work -- a
+# semantic edit to a tracked source file, which `git status` reports the same way
+# it reports real work in progress, and which this box's standing rule tells the
+# next agent not to throw away.
+#
+# A try/finally alone does NOT close this, and measuring it is how you find that
+# out. Across all five scorers in this sweep the finally covered SIGINT and
+# nothing else, because Python raises KeyboardInterrupt for SIGINT and the
+# finally is on the way out. SIGTERM and SIGHUP kill the process between the
+# write and the restore -- and those are exactly what a wall-clock cap, systemd
+# and a process-group kill send. So the signal a finally covers is the one you
+# press by hand while watching, and the ones it misses are the ones an
+# unattended run actually receives.
+#
+# SIGKILL cannot be caught by the process that receives it. It is the one gap
+# left here, and it is named rather than papered over.
+_previous_handlers = {}
+
+
+def _restore_and_reraise(signum, frame):
+    restore()
+    signal.signal(signum, _previous_handlers[signum])
+    os.kill(os.getpid(), signum)
+
+
+for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    _previous_handlers[_sig] = signal.signal(_sig, _restore_and_reraise)
+
+
 print("Sabotaging the rune-boundary truncation fix in llm-bridge-openclaw\n")
 if not self_test():
     sys.exit(2)
 print()
 
 score = 0
-for label, fname, old, new, expect in CASES:
+try:
+    for label, fname, old, new, expect in CASES:
+        restore()
+        p = REPO / fname
+        text = p.read_text()
+        # Exact string replacement, asserted to occur exactly once. A stale pattern
+        # silently mutates nothing and scores a bogus UNNOTICED.
+        if text.count(old) != 1:
+            print(f"  SETUP FAIL   {label}\n      pattern appears {text.count(old)}x in {fname}, want 1")
+            continue
+        p.write_text(text.replace(old, new, 1))
+
+        r = subprocess.run(["go", "test", "-count=1", "-run", TESTS, "."],
+                           cwd=REPO, capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        verdict, detail = classify(out)
+
+        caught = verdict.startswith("CAUGHT") and "NOT coverage" not in verdict
+        ok = caught == expect
+        score += ok
+        want = "CAUGHT" if expect else "UNNOTICED"
+        print(f"  {'ok  ' if ok else 'BAD '} {verdict:<32} (want {want:<9}) {label}")
+        if detail:
+            print(f"         -> {detail}")
+        # Which tests fired. For the two call-site rows this is the whole point:
+        # the claim is that each is caught by its own test alone, and a claim in a
+        # comment is an unmeasured claim.
+        red = FAIL_TEST.findall(out)
+        if red:
+            print(f"         red: {', '.join(red)}")
+finally:
     restore()
-    p = REPO / fname
-    text = p.read_text()
-    # Exact string replacement, asserted to occur exactly once. A stale pattern
-    # silently mutates nothing and scores a bogus UNNOTICED.
-    if text.count(old) != 1:
-        print(f"  SETUP FAIL   {label}\n      pattern appears {text.count(old)}x in {fname}, want 1")
-        continue
-    p.write_text(text.replace(old, new, 1))
+    for _sig, _handler in _previous_handlers.items():
+        signal.signal(_sig, _handler)
 
-    r = subprocess.run(["go", "test", "-count=1", "-run", TESTS, "."],
-                       cwd=REPO, capture_output=True, text=True)
-    out = r.stdout + r.stderr
-    verdict, detail = classify(out)
-
-    caught = verdict.startswith("CAUGHT") and "NOT coverage" not in verdict
-    ok = caught == expect
-    score += ok
-    want = "CAUGHT" if expect else "UNNOTICED"
-    print(f"  {'ok  ' if ok else 'BAD '} {verdict:<32} (want {want:<9}) {label}")
-    if detail:
-        print(f"         -> {detail}")
-    # Which tests fired. For the two call-site rows this is the whole point:
-    # the claim is that each is caught by its own test alone, and a claim in a
-    # comment is an unmeasured claim.
-    red = FAIL_TEST.findall(out)
-    if red:
-        print(f"         red: {', '.join(red)}")
-
-restore()
 print(f"\nscore {score}/{len(CASES)}")
 sys.exit(0 if score == len(CASES) else 1)
