@@ -188,7 +188,7 @@ func translateToolResult(m jsonlMessage, bridgeSessionID, harnessSessionID strin
 			events = append(events, makeEvent(bridgeSessionID, harnessSessionID, msg.EventToolResult, rawMsg, func(e *msg.Event) {
 				e.ToolResult = &msg.ToolResultEvent{
 					Name:   m.ToolName,
-					Output: truncate(block.Text, 500),
+					Output: truncateAtRuneBoundaryWithEllipsis(block.Text, 500),
 				}
 			}))
 		}
