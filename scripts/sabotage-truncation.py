@@ -47,6 +47,9 @@ import signal
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tree_hold  # noqa: E402  vendored; see tree_hold.py on keeping copies identical
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 WALKBACK = "for cut > 0 && !utf8.RuneStart(s[cut]) {"
@@ -331,73 +334,94 @@ def restore():
 #
 # SIGKILL cannot be caught by the process that receives it. It is the one gap
 # left here, and it is named rather than papered over.
-_previous_handlers = {}
+# Card `d869d2be`. Every verdict below is read off the SUITE'S exit code, and that
+# exit code belongs to the whole tree rather than to the mutation this run wrote.
+# A second run mutating these same files hands this one a red suite it did not
+# cause, and this one scores it CAUGHT -- the collision does not add noise, it
+# INFLATES the score, and these scores are what the write-ups quote.
+#
+# The `git status` refusal above is a different guard and cannot stand in for
+# this one: it stops this harness deleting somebody's uncommitted work, and it
+# is blind to a concurrent run, because that run restores each file before its
+# next case and the tree is clean between mutations exactly when trusting it is
+# most dangerous.
+#
+# The hold is taken HERE rather than at the `try` below because the signal
+# handlers installed inside it call `restore()`, which writes to the tree. It
+# refuses rather than waits: a run told to come back later can say so and exit,
+# where one silently blocked for the length of somebody else's suite looks hung.
+with tree_hold.exclusive_hold_on_tree(
+        REPO, purpose=os.path.basename(sys.argv[0] or "sabotage")) as _refusal:
+    if _refusal:
+        sys.exit("REFUSING: " + _refusal)
+
+    _previous_handlers = {}
 
 
-def _restore_and_reraise(signum, frame):
-    restore()
-    signal.signal(signum, _previous_handlers[signum])
-    os.kill(os.getpid(), signum)
-
-
-for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-    _previous_handlers[_sig] = signal.signal(_sig, _restore_and_reraise)
-
-
-print("Sabotaging the rune-boundary truncation fix in llm-bridge-openclaw\n")
-if not self_test():
-    sys.exit(2)
-print()
-
-
-def run_phase(title, cases):
-    """Score one case list. Returns (score, total)."""
-    print(f"--- {title} ---")
-    score = 0
-    for label, fname, old, new, expect in cases:
+    def _restore_and_reraise(signum, frame):
         restore()
-        p = REPO / fname
-        text = p.read_text()
-        # Exact string replacement, asserted to occur exactly once. A stale pattern
-        # silently mutates nothing and scores a bogus UNNOTICED.
-        if text.count(old) != 1:
-            print(f"  SETUP FAIL   {label}\n      pattern appears {text.count(old)}x in {fname}, want 1")
-            continue
-        p.write_text(text.replace(old, new, 1))
-
-        r = subprocess.run(["go", "test", "-count=1", "-run", TESTS, "."],
-                           cwd=REPO, capture_output=True, text=True)
-        out = r.stdout + r.stderr
-        verdict, detail = classify(out)
-
-        caught = verdict.startswith("CAUGHT") and "NOT coverage" not in verdict
-        ok = caught == expect
-        score += ok
-        want = "CAUGHT" if expect else "UNNOTICED"
-        # State the exit code beside the verdict. A RED has to be attributed
-        # before it is scored: a mutant that did not compile goes red for a
-        # reason that says nothing about the suite, and reads identically to a
-        # mutant a test detected unless the run says which happened.
-        print(f"  {'ok  ' if ok else 'BAD '} {verdict:<32} (want {want:<9}) [exit {r.returncode}] {label}")
-        if detail:
-            print(f"         -> {detail}")
-        # Which tests fired. For the two call-site rows this is the whole point:
-        # the claim is that each is caught by its own test alone, and a claim in a
-        # comment is an unmeasured claim.
-        red = FAIL_TEST.findall(out)
-        if red:
-            print(f"         red: {', '.join(red)}")
-    print(f"  {title}: {score}/{len(cases)}\n")
-    return score, len(cases)
+        signal.signal(signum, _previous_handlers[signum])
+        os.kill(os.getpid(), signum)
 
 
-try:
-    mech = run_phase("MECHANISM (does a test observe the behaviour)", MECHANISM_CASES)
-    vals = run_phase("VALUE (does a test observe the NUMBER)", VALUE_CASES)
-finally:
-    restore()
-    for _sig, _handler in _previous_handlers.items():
-        signal.signal(_sig, _handler)
+    for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        _previous_handlers[_sig] = signal.signal(_sig, _restore_and_reraise)
+
+
+    print("Sabotaging the rune-boundary truncation fix in llm-bridge-openclaw\n")
+    if not self_test():
+        sys.exit(2)
+    print()
+
+
+    def run_phase(title, cases):
+        """Score one case list. Returns (score, total)."""
+        print(f"--- {title} ---")
+        score = 0
+        for label, fname, old, new, expect in cases:
+            restore()
+            p = REPO / fname
+            text = p.read_text()
+            # Exact string replacement, asserted to occur exactly once. A stale pattern
+            # silently mutates nothing and scores a bogus UNNOTICED.
+            if text.count(old) != 1:
+                print(f"  SETUP FAIL   {label}\n      pattern appears {text.count(old)}x in {fname}, want 1")
+                continue
+            p.write_text(text.replace(old, new, 1))
+
+            r = subprocess.run(["go", "test", "-count=1", "-run", TESTS, "."],
+                               cwd=REPO, capture_output=True, text=True)
+            out = r.stdout + r.stderr
+            verdict, detail = classify(out)
+
+            caught = verdict.startswith("CAUGHT") and "NOT coverage" not in verdict
+            ok = caught == expect
+            score += ok
+            want = "CAUGHT" if expect else "UNNOTICED"
+            # State the exit code beside the verdict. A RED has to be attributed
+            # before it is scored: a mutant that did not compile goes red for a
+            # reason that says nothing about the suite, and reads identically to a
+            # mutant a test detected unless the run says which happened.
+            print(f"  {'ok  ' if ok else 'BAD '} {verdict:<32} (want {want:<9}) [exit {r.returncode}] {label}")
+            if detail:
+                print(f"         -> {detail}")
+            # Which tests fired. For the two call-site rows this is the whole point:
+            # the claim is that each is caught by its own test alone, and a claim in a
+            # comment is an unmeasured claim.
+            red = FAIL_TEST.findall(out)
+            if red:
+                print(f"         red: {', '.join(red)}")
+        print(f"  {title}: {score}/{len(cases)}\n")
+        return score, len(cases)
+
+
+    try:
+        mech = run_phase("MECHANISM (does a test observe the behaviour)", MECHANISM_CASES)
+        vals = run_phase("VALUE (does a test observe the NUMBER)", VALUE_CASES)
+    finally:
+        restore()
+        for _sig, _handler in _previous_handlers.items():
+            signal.signal(_sig, _handler)
 
 score = mech[0] + vals[0]
 total = mech[1] + vals[1]
