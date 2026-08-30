@@ -263,3 +263,110 @@ func TestHTTPErrorBodyStaysValidUTF8(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The two tests below pin the call-site budgets themselves, which the six above
+// do not. Every test above this line moves a direction or a mechanism: the
+// helper is asked to cut correctly at whatever budget it is handed, and the
+// call-site tests slide their padding around the budget the caller passes. None
+// of them observes the NUMBER. Measured with scripts/sabotage-truncation.py:
+// with only the tests above, 500 -> 499, 200 -> 199 and 200 -> 201 all pass the
+// whole suite. Only 500 -> 501 goes red, and only because one assertion happens
+// to name that side.
+//
+// These are not defect fixes. Both budgets are correct values that nothing was
+// holding in place; this is insurance, and reading it as three live bugs would
+// be wrong.
+//
+// Two things about how they are written, both of which are the point:
+//
+//   * They MARK A CHARACTER rather than assert a length. A cut that keeps the
+//     wrong end of the string (s[len(s)-n:] where s[:n] was meant) returns
+//     exactly the right length and passes any length assertion. The marker at
+//     the last in-budget offset must survive and the marker at the first
+//     out-of-budget offset must not, so the test names which side the cut fell
+//     on rather than how far along it was.
+//
+//   * They spell the budget out. A test that derives its expectation from the
+//     same constant the code compares against moves with it and is green
+//     against the drift it exists to catch. There is no named constant here to
+//     import, but the rule is the reason the number is written twice.
+
+// boundaryMarked builds an ASCII string longer than budget with a unique
+// character at the last in-budget offset and another at the first offset past
+// it. Both markers are single-byte, so nothing here depends on rune widths —
+// this test asks where the cut landed, not whether it split a rune.
+//
+// It returns the string plus the two markers so a caller cannot pass one budget
+// to the fixture and assert against another.
+func boundaryMarked(budget int) (text, lastIn, firstOut string) {
+	lastIn, firstOut = "X", "Y"
+	body := []byte(strings.Repeat("a", budget+50))
+	body[budget-1] = lastIn[0]
+	body[budget] = firstOut[0]
+	return string(body), lastIn, firstOut
+}
+
+// TestToolResultOutputIsCutAtExactlyFiveHundredBytes pins translate.go's budget.
+func TestToolResultOutputIsCutAtExactlyFiveHundredBytes(t *testing.T) {
+	text, lastIn, firstOut := boundaryMarked(500)
+	// Guard the fixture before trusting it: "contains" is only an answer about
+	// position while each marker occurs exactly once.
+	if strings.Count(text, lastIn) != 1 || strings.Count(text, firstOut) != 1 {
+		t.Fatalf("fixture is ambiguous: %d in-budget markers, %d out-of-budget markers",
+			strings.Count(text, lastIn), strings.Count(text, firstOut))
+	}
+
+	content, err := json.Marshal([]contentBlock{{Type: "text", Text: text}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	events := translateToolResult(
+		jsonlMessage{Role: "toolResult", ToolName: "Bash", Content: content},
+		"bsid-budget", "hsid-budget", []byte("{}"))
+	if len(events) != 1 {
+		t.Fatalf("want 1 tool-result event, got %d", len(events))
+	}
+	if events[0].ToolResult == nil {
+		t.Fatal("event carries no ToolResult")
+	}
+
+	output := events[0].ToolResult.Output
+	if !strings.Contains(output, lastIn) {
+		t.Fatalf("the byte at offset 499 was dropped, so the tool-result budget is below 500: %q", output)
+	}
+	if strings.Contains(output, firstOut) {
+		t.Fatalf("the byte at offset 500 was kept, so the tool-result budget is above 500: %q", output)
+	}
+}
+
+// TestHTTPErrorBodyIsCutAtExactlyTwoHundredBytes pins client.go's budget. The
+// test above it, TestHTTPErrorBodyStaysValidUTF8, asserts validity only and
+// makes no claim about length in either direction.
+func TestHTTPErrorBodyIsCutAtExactlyTwoHundredBytes(t *testing.T) {
+	body, lastIn, firstOut := boundaryMarked(200)
+	if strings.Count(body, lastIn) != 1 || strings.Count(body, firstOut) != 1 {
+		t.Fatalf("fixture is ambiguous: %d in-budget markers, %d out-of-budget markers",
+			strings.Count(body, lastIn), strings.Count(body, firstOut))
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	cfg := &Config{OpenClawURL: srv.URL}
+	err := sendToOpenClaw(context.Background(), cfg, "agent", "session", "hi")
+	if err == nil {
+		t.Fatal("want an error from a 500 response, got nil")
+	}
+
+	got := err.Error()
+	if !strings.Contains(got, lastIn) {
+		t.Fatalf("the byte at offset 199 was dropped, so the error-body budget is below 200: %q", got)
+	}
+	if strings.Contains(got, firstOut) {
+		t.Fatalf("the byte at offset 200 was kept, so the error-body budget is above 200: %q", got)
+	}
+}

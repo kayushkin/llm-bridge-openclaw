@@ -79,7 +79,7 @@ CLIENT_BYTECUT = (
     '\t\treturn fmt.Errorf("http %d: %s", resp.StatusCode, byteCut(string(body)))'
 )
 
-CASES = [
+MECHANISM_CASES = [
     # (label, file, old, new, expect_caught)
     ("the walk-back never runs, so the cut splits a rune again",
      "client.go", WALKBACK, "for cut > len(s) && !utf8.RuneStart(s[cut]) {", True),
@@ -110,12 +110,80 @@ CASES = [
      "client.go", FITS, "\tif len(s) < maxBytes+1 {", False),
 ]
 
+# ---------------------------------------------------------------------------
+# VALUE phase (card `23be5012`, the llm-bridge-openclaw row).
+#
+# Every row in MECHANISM_CASES moves a DIRECTION or deletes a MECHANISM. None of
+# them asks whether the NUMBER the code compares against is observed. A suite can
+# score 8/8 above with every budget free to drift to a different value.
+#
+# Two rules inherited from the rows this sweep has already scored, both of which
+# cost an earlier pass a wrong answer:
+#
+#   * Move the literal by ONE unit. `>= 3 -> >= 300` is a deletion wearing a
+#     number: it is caught by the mechanism the guard implements, not by the
+#     value. Each budget here is therefore moved DOWN one and UP one, so a test
+#     that pins only the "not over budget" side is visibly one-directional.
+#
+#   * A test that READS the constant it exists to hold cannot hold it. Both
+#     budgets here are call-site literals with no named constant, so there is
+#     nothing to import -- but the tests below spell the numbers absolutely for
+#     the same reason, and the no-op controls prove the phase is not simply
+#     sensitive to the line being touched.
+#
+# Scope, stated rather than implied: this table covers the literals on the
+# truncation path, which is what the -run filter exercises. `translate.go`'s
+# `len(block.Arguments) > 0` is a tool-call literal on a different path and is
+# deliberately absent -- mutating it under this filter would score UNNOTICED for
+# the reason that no test was run, not for the reason that none asserts it.
+VALUE_CASES = [
+    # (label, file, old, new, expect_caught)
+    ("the tier-1 tool-result budget drifts DOWN one byte, 500 -> 499",
+     "translate.go", TRANSLATE_CALL,
+     TRANSLATE_CALL.replace("500", "499"), True),
+    ("the tier-1 tool-result budget drifts UP one byte, 500 -> 501",
+     "translate.go", TRANSLATE_CALL,
+     TRANSLATE_CALL.replace("500", "501"), True),
+    ("the http error-body budget drifts DOWN one byte, 200 -> 199",
+     "client.go", CLIENT_CALL, CLIENT_CALL.replace("200", "199"), True),
+    ("the http error-body budget drifts UP one byte, 200 -> 201",
+     "client.go", CLIENT_CALL, CLIENT_CALL.replace("200", "201"), True),
+    # Not a call-site budget: the two literals the helper itself compares
+    # against. Included because they are exactly the kind of number a
+    # mechanism row moves past without observing.
+    ("the walk-back's floor moves off zero, so cut=1 is never walked back",
+     "client.go", WALKBACK, "for cut > 1 && !utf8.RuneStart(s[cut]) {", True),
+    ("the fits-in-budget test admits one byte too many, <= maxBytes -> <= maxBytes+1",
+     "client.go", FITS, "\tif len(s) <= maxBytes+1 {", True),
+    # The row that proves the marker earns its place. A cut that keeps the WRONG
+    # END of the string returns exactly the right number of bytes, so every
+    # length assertion in this file is green against it and only a test naming
+    # WHICH characters survived can see it. Both budget tests must go red here;
+    # if either does not, its marker is decoration and its budget is pinned to a
+    # band rather than to a value.
+    ("the helper keeps the LAST cut bytes instead of the first -- right length, wrong end",
+     "client.go", '\treturn s[:cut] + "..."', '\treturn s[len(s)-cut:] + "..."', True),
+    # Known-NEGATIVE controls for THIS phase. Same value, written differently.
+    # A phase that reports CAUGHT here is sensitive to the line being touched
+    # rather than to the number it carries, and every row above it is void.
+    ("CONTROL (no-op): the tool-result budget is spelled 250*2, same value",
+     "translate.go", TRANSLATE_CALL, TRANSLATE_CALL.replace("500", "250*2"), False),
+    ("CONTROL (no-op): the error-body budget is spelled 100+100, same value",
+     "client.go", CLIENT_CALL, CLIENT_CALL.replace("200", "100+100"), False),
+]
+
 TESTS = ("TestTruncateAtRuneBoundaryWithEllipsisSlidesTheCutAcrossEveryOffset|"
          "TestTruncateAtRuneBoundaryWithEllipsisMixedWidths|"
          "TestTruncateAtRuneBoundaryWithEllipsisEdgeCases|"
          "TestTruncateAtRuneBoundaryWithEllipsisLeavesTheBudgetArithmeticAlone|"
          "TestToolResultOutputStaysValidUTF8|"
-         "TestHTTPErrorBodyStaysValidUTF8")
+         "TestHTTPErrorBodyStaysValidUTF8|"
+         # The two budget tests. Named explicitly rather than widening the
+         # filter to the package: a -run that matches everything scores rows
+         # against tests that have nothing to do with this fix, and a CAUGHT
+         # from one of those is not evidence about truncation.
+         "TestToolResultOutputIsCutAtExactlyFiveHundredBytes|"
+         "TestHTTPErrorBodyIsCutAtExactlyTwoHundredBytes")
 
 # Messages from fixture guards rather than from an assertion about truncation.
 # A red run that shows only these is the test falling over, not detecting.
@@ -128,6 +196,7 @@ GUARD_MARKERS = (
     "want an error from a 500 response",
     "the cut never landed inside a rune",
     "the known-negative control never ran",
+    "fixture is ambiguous:",
 )
 
 FAIL_LINE = re.compile(r"^\s*truncate_test\.go:\d+: (.*)$", re.M)
@@ -280,9 +349,12 @@ if not self_test():
     sys.exit(2)
 print()
 
-score = 0
-try:
-    for label, fname, old, new, expect in CASES:
+
+def run_phase(title, cases):
+    """Score one case list. Returns (score, total)."""
+    print(f"--- {title} ---")
+    score = 0
+    for label, fname, old, new, expect in cases:
         restore()
         p = REPO / fname
         text = p.read_text()
@@ -302,7 +374,11 @@ try:
         ok = caught == expect
         score += ok
         want = "CAUGHT" if expect else "UNNOTICED"
-        print(f"  {'ok  ' if ok else 'BAD '} {verdict:<32} (want {want:<9}) {label}")
+        # State the exit code beside the verdict. A RED has to be attributed
+        # before it is scored: a mutant that did not compile goes red for a
+        # reason that says nothing about the suite, and reads identically to a
+        # mutant a test detected unless the run says which happened.
+        print(f"  {'ok  ' if ok else 'BAD '} {verdict:<32} (want {want:<9}) [exit {r.returncode}] {label}")
         if detail:
             print(f"         -> {detail}")
         # Which tests fired. For the two call-site rows this is the whole point:
@@ -311,10 +387,19 @@ try:
         red = FAIL_TEST.findall(out)
         if red:
             print(f"         red: {', '.join(red)}")
+    print(f"  {title}: {score}/{len(cases)}\n")
+    return score, len(cases)
+
+
+try:
+    mech = run_phase("MECHANISM (does a test observe the behaviour)", MECHANISM_CASES)
+    vals = run_phase("VALUE (does a test observe the NUMBER)", VALUE_CASES)
 finally:
     restore()
     for _sig, _handler in _previous_handlers.items():
         signal.signal(_sig, _handler)
 
-print(f"\nscore {score}/{len(CASES)}")
-sys.exit(0 if score == len(CASES) else 1)
+score = mech[0] + vals[0]
+total = mech[1] + vals[1]
+print(f"score {score}/{total}  (mechanism {mech[0]}/{mech[1]}, value {vals[0]}/{vals[1]})")
+sys.exit(0 if score == total else 1)
