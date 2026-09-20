@@ -14,6 +14,11 @@
 # us about it.
 set -euo pipefail
 
+# One shared gate decides whether this tree may be deployed (main clone, default
+# branch, clean, pushed, not behind, and the same for every tree the build reads).
+# It lives in healthcheck/scripts/deploy-gate.sh. Do not inline or copy it.
+( cd "$(dirname "$0")" && "$HOME/bin/deploy-gate" check )
+
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_NAME="llm-bridge-openclaw"
 USER_BIN="$HOME/bin/$BIN_NAME"
@@ -47,3 +52,6 @@ echo "==> Verifying..."
 echo "    openclaw gateway: ${OPENCLAW_URL:-http://127.0.0.1:18789} $(curl -sfS -o /dev/null -m 2 "${OPENCLAW_URL:-http://127.0.0.1:18789}/v1/models" 2>/dev/null && echo '(reachable)' || echo '(not reachable from here — sessions resolve it at start)')"
 
 echo "==> Done. bridge-server picks up the new binary on the next session spawn (no restart needed)."
+
+# Last act: write this deploy to repo-store's ledger, so the next agent sees what is live.
+( cd "$(dirname "$0")" && "$HOME/bin/deploy-gate" record )
