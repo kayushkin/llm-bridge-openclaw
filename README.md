@@ -47,7 +47,12 @@ go build -o llm-bridge-openclaw
 
 # Print version.
 ./llm-bridge-openclaw -version
+
+# Print the sessions this bridge can resume, as a JSON array of msg.StoredSession.
+./llm-bridge-openclaw -discover
 ```
+
+`-import-history` is not implemented: it prints a message on stderr and exits 2.
 
 Send a JSON-RPC request to start a session:
 
@@ -60,7 +65,7 @@ Send a JSON-RPC request to start a session:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCLAW_URL` | `http://127.0.0.1:18789` | OpenClaw gateway base URL |
-| `OPENCLAW_DIR` | — | Path to OpenClaw's storage directory (the parent of `agents/`). Required for event emission — without it, `start` and `message` will reach OpenClaw, but the bridge will not surface any assistant output. |
+| `OPENCLAW_DIR` | `~/.openclaw` | Path to OpenClaw's storage directory (the parent of `agents/`). Every event with assistant output comes from the transcripts under it. If it points at the wrong place, `start` and `message` still reach OpenClaw, but the bridge surfaces no assistant output. |
 | `OPENCLAW_TOKEN` | — | Optional bearer token sent as `Authorization: Bearer …` |
 
 The bridge also sends OpenClaw-specific request headers automatically:
@@ -73,9 +78,9 @@ The bridge also sends OpenClaw-specific request headers automatically:
 
 | Method | Description |
 |--------|-------------|
-| `start` | Initialize the session, start the JSONL tailer (if `OPENCLAW_DIR` is set), and forward `prompt` as the first user message. Params: `session_id`, `agent_id` (default `main`), `prompt`, `display_name`, `resume`, `fork` |
+| `start` | Initialize the session, start the JSONL tailer, and forward `prompt` as the first user message. Params: `bridge_session_id`, `harness_session_id`, `session_id` (deprecated; read only as the bridge session id), `agent_id` (default `main`), `prompt`, `display_name`, `resume`, `fork` |
 | `message` | Send a follow-up message. Params: `content` |
-| `compact` | Acknowledged with a `system` event; OpenClaw manages compaction internally |
+| `compact` | Refused with an `error` event, code `UNSUPPORTED`: the chat-completions endpoint has no compaction operation, and the bridge has no other way into OpenClaw |
 | `resume` | Restart the JSONL tailer if not running |
 
 ## Canonical Events Emitted
@@ -137,7 +142,7 @@ a stream that never ends, which is the shape of a long turn.
   the tailer.
 - **No system prompt**: `start.system_prompt` is not forwarded — OpenClaw's agent persona/system message is configured server-side.
 - **No `set_model` / `config`**: model selection is determined by the OpenClaw gateway; the request always uses `model: "openclaw"`.
-- **No `discover`**: the source contains `discoverAllSessions` and `listSessions` helpers in `tail.go`, but they are not wired into the JSON-RPC dispatch.
+- **No `discover` method**: discovery is the `-discover` flag, not a JSON-RPC call, and it lists only each agent's `main` session, because that is the only one the bridge can resume. `listSessions` and `watchNewSessions` in `tail.go` have no callers.
 - **No `fork` translation**: OpenClaw has no session-cloning primitive, so a
   `start` carrying `fork` is refused with `FORK_UNSUPPORTED` rather than
   silently starting a fresh chain. OpenClaw branches are managed via its own

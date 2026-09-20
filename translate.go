@@ -209,8 +209,9 @@ func isHiddenOutbound(text string) bool {
 
 // makeEvent builds a canonical msg.Event with both session ids stamped.
 // bridgeSessionID is the caller's stable id; harnessSessionID is the OpenClaw-
-// native id (for openclaw they are equal, since OpenClaw does not surface its
-// own session id back through the OpenAI-compatible REST API).
+// native id, which is empty unless the caller supplied one: OpenClaw does not
+// surface its own session id through the OpenAI-compatible REST API, and the
+// two must never be equal (see resolveHarnessSessionID in handler.go).
 func makeEvent(bridgeSessionID, harnessSessionID string, eventType msg.EventType, raw json.RawMessage, fill func(*msg.Event)) msg.Event {
 	e := msg.Event{
 		Type:             eventType,
