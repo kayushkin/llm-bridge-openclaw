@@ -12,7 +12,7 @@ import (
 
 // discoverScope filters discoveredSession results to those the OpenClaw
 // harness can actually resume today. handler.go hardcodes sessionName="main"
-// (handler.go:231,238), so subagent / cron / hook sessions on disk surface
+// in both its send and its read path, so subagent / cron / hook sessions on disk surface
 // for visibility but cannot yet be resumed; for the first conformance cut
 // we restrict discover to the canonical "main" session per agent. Once
 // handler.go grows multi-session support this can widen.
