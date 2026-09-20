@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // openaiRequest is the OpenAI-compatible request format for OpenClaw.
@@ -65,7 +66,7 @@ func sendToOpenClaw(ctx context.Context, cfg *Config, agentID, sessionName, cont
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(body), 200))
+		return fmt.Errorf("http %d: %s", resp.StatusCode, truncateAtRuneBoundaryWithEllipsis(string(body), 200))
 	}
 
 	// Consume the SSE stream to keep the connection alive.
@@ -101,9 +102,43 @@ func sendToOpenClaw(ctx context.Context, cfg *Config, agentID, sessionName, cont
 	return nil
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
+// truncateAtRuneBoundaryWithEllipsis returns s unchanged when it fits in
+// maxBytes, and otherwise the longest prefix of s that is no longer than
+// maxBytes and does not end part-way through a multi-byte UTF-8 sequence,
+// followed by an ellipsis marking that something was dropped.
+//
+// Cutting a Go string at a fixed byte offset splits whatever rune straddles that
+// offset, and the result is not valid UTF-8. Nothing reports it: encoding/json
+// substitutes U+FFFD rather than failing, so the reader sees a replacement
+// character and no error is raised anywhere along the way. That matters most at
+// the translate.go caller, whose result becomes msg.ToolResultEvent.Output and
+// is marshalled to stdout by emitEvent for bridge-server — a split rune crosses
+// to the session view and a reload does not fix it.
+//
+// The ellipsis sits OUTSIDE maxBytes, so a cut result is maxBytes+3 bytes. That
+// is pre-existing behaviour and is deliberately left alone; whether the marker
+// ought to count against the budget is a separate question from where the cut
+// lands.
+//
+// The walk-back costs at most three byte comparisons and allocates nothing,
+// which is why it is preferred here over converting to []rune.
+func truncateAtRuneBoundaryWithEllipsis(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
 		return s
 	}
-	return s[:max] + "..."
+	// Past here a cut happens, so the slice below runs. A negative budget would
+	// panic it (s[:-1]); clamp to zero, which yields the marker alone — the same
+	// answer a budget of zero already gave. Neither caller can reach this today,
+	// both passing a compile-time constant, but the helper is package-level and
+	// a crash is a poor answer to a nonsensical budget.
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	// s[cut] is the first byte past the prefix. While it is a continuation
+	// byte, a rune straddles the cut, so move the cut earlier.
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
