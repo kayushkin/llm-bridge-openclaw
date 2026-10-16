@@ -75,5 +75,9 @@ echo "    openclaw gateway: ${OPENCLAW_URL:-http://127.0.0.1:18789} $(curl -sfS 
 
 echo "==> Done. bridge-server picks up the new binary on the next session spawn (no restart needed)."
 
+# Runner machines download this wrapper from the bridge too; the shared script
+# in llm-bridge-runner cross-builds and publishes it (todo 919fa8b7).
+( cd "$REPO_DIR" && "$REPO_DIR/../llm-bridge-runner/scripts/publish-harness-wrapper.sh" "$BIN_NAME" )
+
 # Last act: write this deploy to repo-store's ledger, so the next agent sees what is live.
 ( cd "$(dirname "$0")" && "$HOME/bin/deploy-gate" record )
