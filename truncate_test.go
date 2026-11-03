@@ -33,7 +33,7 @@ import (
 const musicalNote = "\U0001D11E"
 
 // ellipsis is the marker the helper appends when it actually cut something. It
-// sits OUTSIDE maxBytes, which is pre-existing behaviour this fix deliberately
+// sits OUTSIDE maxBytes, which is pre-existing behavior this fix deliberately
 // preserves — whether it ought to count against the budget is the sweep's one
 // parked decision and is not settled here.
 const ellipsis = "..."

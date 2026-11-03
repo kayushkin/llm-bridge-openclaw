@@ -89,7 +89,7 @@ func sendToOpenClaw(ctx context.Context, cfg *Config, agentID, sessionName, cont
 	// clean stream end. Logging it was not enough — this function's return
 	// value is the caller's only signal, so a stream that died mid-turn was
 	// still reported to the harness as a turn that finished. That mattered the
-	// moment an interrupt became possible: cancelling the turn context aborts
+	// moment an interrupt became possible: canceling the turn context aborts
 	// the read here, and the caller has to see a cancellation rather than a
 	// completed turn. Scan stops at EOF with a nil Err, so a stream that ends
 	// without [DONE] is still the clean case it always was.
@@ -116,7 +116,7 @@ func sendToOpenClaw(ctx context.Context, cfg *Config, agentID, sessionName, cont
 // to the session view and a reload does not fix it.
 //
 // The ellipsis sits OUTSIDE maxBytes, so a cut result is maxBytes+3 bytes. That
-// is pre-existing behaviour and is deliberately left alone; whether the marker
+// is pre-existing behavior and is deliberately left alone; whether the marker
 // ought to count against the budget is a separate question from where the cut
 // lands.
 //

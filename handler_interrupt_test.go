@@ -24,16 +24,16 @@ func newTestHarness(cfg *Config) *Harness {
 // change. SIGINT is llm-bridge-server's Stop, and the handler used to call
 // os.Exit on it, so Stop killed the openclaw session instead of the turn.
 //
-// The two assertions are inseparable: cancelling the turn while also exiting
-// would still lose the session, and staying alive without cancelling would
+// The two assertions are inseparable: canceling the turn while also exiting
+// would still lose the session, and staying alive without canceling would
 // make Stop do nothing at all.
 func TestWatchSignalsInterruptsTurnAndStaysAlive(t *testing.T) {
 	_, restore := captureEvents(t)
 	defer restore()
 
 	h := newTestHarness(&Config{})
-	cancelled := make(chan struct{}, 1)
-	h.turnCancel = func() { cancelled <- struct{}{} }
+	canceled := make(chan struct{}, 1)
+	h.turnCancel = func() { canceled <- struct{}{} }
 
 	terminated := make(chan struct{}, 1)
 	sigs := make(chan os.Signal, 1)
@@ -42,7 +42,7 @@ func TestWatchSignalsInterruptsTurnAndStaysAlive(t *testing.T) {
 	sigs <- syscall.SIGINT
 
 	select {
-	case <-cancelled:
+	case <-canceled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("SIGINT did not cancel the in-flight turn")
 	}
@@ -54,23 +54,23 @@ func TestWatchSignalsInterruptsTurnAndStaysAlive(t *testing.T) {
 	}
 
 	if h.ctx.Err() != nil {
-		t.Errorf("harness root context is cancelled after an interrupt (%v) — the session did not survive", h.ctx.Err())
+		t.Errorf("harness root context is canceled after an interrupt (%v) — the session did not survive", h.ctx.Err())
 	}
 }
 
-// TestWatchSignalsHonoursEverySIGINT pins the range loop.
+// TestWatchSignalsHonorsEverySIGINT pins the range loop.
 //
 // A single `sig := <-sigs` read passes the test above and still leaves the
 // session broken: the turn cancel is rebuilt per turn, so a handler that
-// returns after one signal honours the first Stop of a session and silently
+// returns after one signal honors the first Stop of a session and silently
 // ignores every Stop after it. That is the defect aider, forgecode and nanoclaw
 // each carried, and it only shows up from the second Stop onwards.
-func TestWatchSignalsHonoursEverySIGINT(t *testing.T) {
+func TestWatchSignalsHonorsEverySIGINT(t *testing.T) {
 	_, restore := captureEvents(t)
 	defer restore()
 
 	h := newTestHarness(&Config{})
-	cancelled := make(chan struct{}, 3)
+	canceled := make(chan struct{}, 3)
 
 	sigs := make(chan os.Signal, 1)
 	go watchSignals(h, sigs, func() { t.Error("SIGINT terminated the process") })
@@ -78,13 +78,13 @@ func TestWatchSignalsHonoursEverySIGINT(t *testing.T) {
 	for turn := 1; turn <= 3; turn++ {
 		// Each turn installs its own cancel, exactly as sendMessage does.
 		h.turnMu.Lock()
-		h.turnCancel = func() { cancelled <- struct{}{} }
+		h.turnCancel = func() { canceled <- struct{}{} }
 		h.turnMu.Unlock()
 
 		sigs <- syscall.SIGINT
 
 		select {
-		case <-cancelled:
+		case <-canceled:
 		case <-time.After(2 * time.Second):
 			t.Fatalf("turn %d: SIGINT was ignored — the handler stopped reading signals", turn)
 		}
@@ -154,7 +154,7 @@ func TestInterruptAbortsInFlightRequest(t *testing.T) {
 	// run hangs instead of failing: the handler streams until the client
 	// disconnects, and server.Close waits for outstanding handlers, so the
 	// exact sabotage this test exists to catch — a turn that cannot be
-	// cancelled — would deadlock the package rather than report itself.
+	// canceled — would deadlock the package rather than report itself.
 	testDone := make(chan struct{})
 	var closeStreaming, closeDisconnected bool
 
@@ -200,7 +200,7 @@ func TestInterruptAbortsInFlightRequest(t *testing.T) {
 	go func() { sendErr <- h.sendMessage("a long turn") }()
 
 	// Wait for the turn to be genuinely in flight before interrupting it,
-	// so a pass cannot come from cancelling a request that never started.
+	// so a pass cannot come from canceling a request that never started.
 	select {
 	case <-streaming:
 	case <-time.After(5 * time.Second):
@@ -227,7 +227,7 @@ func TestInterruptAbortsInFlightRequest(t *testing.T) {
 	}
 
 	if h.ctx.Err() != nil {
-		t.Errorf("interrupting a turn cancelled the harness root context (%v) — the tailer and session would die with it", h.ctx.Err())
+		t.Errorf("interrupting a turn canceled the harness root context (%v) — the tailer and session would die with it", h.ctx.Err())
 	}
 
 	var sawInterrupted, sawSendError bool

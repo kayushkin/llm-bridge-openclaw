@@ -9,7 +9,7 @@
 #
 #   1. SIGINT cancels the in-flight turn and the process stays alive
 #   2. the turn's POST is really aborted (the server sees the client go away)
-#   3. every later SIGINT is honoured too, not just the first of the session
+#   3. every later SIGINT is honored too, not just the first of the session
 #   4. SIGTERM still ends the process
 #
 # Nothing here needs a real OpenClaw: the bridge's only outbound channel is
@@ -147,7 +147,7 @@ pass "emitted an interrupt system event"
 
 grep -q '"code":"INTERRUPTED"' "$work/events.ndjson" \
     || fail "no INTERRUPTED error event emitted"
-pass "reported the cancelled turn as INTERRUPTED"
+pass "reported the canceled turn as INTERRUPTED"
 
 grep -q '"code":"SEND_ERROR"' "$work/events.ndjson" \
     && fail "reported an interrupt as SEND_ERROR — a UI cannot tell 'you stopped this' from 'this broke'"
@@ -160,4 +160,4 @@ alive && fail "SIGTERM did not stop the harness — it is now unkillable by its 
 pass "SIGTERM shut the harness down"
 
 echo
-echo "interrupt smoke PASSED (3 interrupts honoured, session survived all of them)"
+echo "interrupt smoke PASSED (3 interrupts honored, session survived all of them)"

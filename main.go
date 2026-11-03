@@ -122,7 +122,7 @@ func main() {
 //
 // It must be a loop rather than a single read. llm-bridge-server's Stop is a
 // SIGINT and there is no JSON-RPC interrupt method, so a handler that reads one
-// signal honours the first Stop of a session and silently ignores every Stop
+// signal honors the first Stop of a session and silently ignores every Stop
 // after it — which is how the same defect hid in aider, forgecode and nanoclaw.
 // It also lives here, out of the goroutine literal it used to be written in,
 // because a handler observable only by dying cannot be tested.
@@ -132,7 +132,7 @@ func main() {
 func watchSignals(h *Harness, sigs <-chan os.Signal, terminate func()) {
 	for sig := range sigs {
 		if sig == syscall.SIGINT {
-			log.Printf("received %v, cancelling the in-flight turn", sig)
+			log.Printf("received %v, canceling the in-flight turn", sig)
 			if err := h.handleInterrupt(); err != nil {
 				log.Printf("interrupt: %v", err)
 			}

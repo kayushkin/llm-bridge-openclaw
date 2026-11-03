@@ -35,7 +35,7 @@ func NewTailer(path, bridgeSessionID, harnessSessionID string, agg *UsageAggrega
 }
 
 // Run tails the JSONL file from the current end, emitting events for new entries.
-// Blocks until ctx is cancelled.
+// Blocks until ctx is canceled.
 func (t *Tailer) Run(ctx context.Context) {
 	f, err := os.Open(t.path)
 	if err != nil {

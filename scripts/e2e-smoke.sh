@@ -22,7 +22,7 @@
 #                     (a nil slice encoded straight out) or a stray log line on
 #                     stdout would both break it while compiling perfectly.
 #   2. the main loop  boots the production JSON-RPC path and shuts down cleanly when stdin closes.
-#   3. the sandbox    is honoured — see below.
+#   3. the sandbox    is honored — see below.
 #
 # HERMETICITY IS AN ASSERTION HERE, NOT A PRECAUTION.
 # The harness resolves its own state and session paths from $HOME. This smoke

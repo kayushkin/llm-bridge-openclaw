@@ -25,7 +25,7 @@ Three things inherited from earlier passes of this sweep, all learned expensivel
     identifier live. Deleting the walk-back orphans the `utf8` import, and
     `go test` runs vet, so the case would report a compile error instead of a
     score -- and a compile error hides whether any test would have caught the
-    behaviour.
+    behavior.
 
   * CAUGHT is split into assertion-fired and guard-fired. A test can go red
     because its own fixture blew up (t.Fatalf on a setup step) rather than
@@ -59,7 +59,7 @@ FITS = "\tif len(s) <= maxBytes {"
 # The two call sites. Each is replaced by an inline func literal reintroducing
 # the original byte cut, rather than by deleting the call: the helper stays
 # referenced from the other file either way, but composing keeps the mutation
-# a behaviour change rather than a compile experiment.
+# a behavior change rather than a compile experiment.
 TRANSLATE_CALL = "\t\t\t\t\tOutput: truncateAtRuneBoundaryWithEllipsis(block.Text, 500),"
 TRANSLATE_BYTECUT = (
     "\t\t\t\t\tOutput: func(s string) string {\n"
@@ -100,7 +100,7 @@ MECHANISM_CASES = [
      "translate.go", TRANSLATE_CALL, TRANSLATE_BYTECUT, True),
     ("only the client.go error-string call site reverts to a plain byte cut",
      "client.go", CLIENT_CALL, CLIENT_BYTECUT, True),
-    # Known-NEGATIVE controls. Neither changes behaviour, so a harness that
+    # Known-NEGATIVE controls. Neither changes behavior, so a harness that
     # reports CAUGHT here is reporting CAUGHT for everything.
     #
     # maxBytes==0 clamps to 0, which it already was, so widening the clamp to
@@ -108,7 +108,7 @@ MECHANISM_CASES = [
     ("CONTROL (no-op): the negative-budget clamp widens from <0 to <=0",
      "client.go", CLAMP, "\tif maxBytes <= 0 {", False),
     # A pure rewrite of the same comparison. If this scores CAUGHT the suite is
-    # sensitive to something other than behaviour.
+    # sensitive to something other than behavior.
     ("CONTROL (no-op): the fits-in-budget test is rewritten, same semantics",
      "client.go", FITS, "\tif len(s) < maxBytes+1 {", False),
 ]
@@ -416,7 +416,7 @@ with tree_hold.exclusive_hold_on_tree(
 
 
     try:
-        mech = run_phase("MECHANISM (does a test observe the behaviour)", MECHANISM_CASES)
+        mech = run_phase("MECHANISM (does a test observe the behavior)", MECHANISM_CASES)
         vals = run_phase("VALUE (does a test observe the NUMBER)", VALUE_CASES)
     finally:
         restore()

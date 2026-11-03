@@ -261,11 +261,11 @@ func (h *Harness) handleResume() error {
 //
 // What an interrupt here does NOT promise is that OpenClaw stops generating.
 // The only outbound channel this bridge has is POST /v1/chat/completions
-// (client.go), so cancelling the turn is a client disconnect; whether OpenClaw
-// abandons the turn on disconnect is OpenClaw's behaviour, not something this
+// (client.go), so canceling the turn is a client disconnect; whether OpenClaw
+// abandons the turn on disconnect is OpenClaw's behavior, not something this
 // repo can assert. Anything it does keep producing still arrives through the
 // JSONL tailer, which runs on the harness root context and is deliberately
-// left alone here — cancelling it would blind the session to its own output.
+// left alone here — canceling it would blind the session to its own output.
 func (h *Harness) handleInterrupt() error {
 	h.turnMu.Lock()
 	cancel := h.turnCancel
@@ -280,7 +280,7 @@ func (h *Harness) handleInterrupt() error {
 
 	cancel()
 	h.emit(msg.EventSystem, func(e *msg.Event) {
-		e.System = &msg.SystemEvent{Subtype: "interrupt", Message: "turn cancelled"}
+		e.System = &msg.SystemEvent{Subtype: "interrupt", Message: "turn canceled"}
 	})
 	return nil
 }
@@ -289,7 +289,7 @@ func (h *Harness) handleInterrupt() error {
 // that turn's SSE stream ends, the turn is interrupted, or the request fails.
 //
 // The request is built from a per-turn context rather than from the harness
-// root, and that is what makes an interrupt possible at all: cancelling the
+// root, and that is what makes an interrupt possible at all: canceling the
 // turn context aborts the in-flight POST and its SSE drain while the harness,
 // the tailer and the session survive. Shutdown cancels the root instead and
 // takes the whole session with it.
@@ -320,7 +320,7 @@ func (h *Harness) sendMessage(content string) error {
 		h.emit(msg.EventError, func(e *msg.Event) {
 			e.Error = &msg.ErrorEvent{
 				Code:      "INTERRUPTED",
-				Message:   "turn cancelled",
+				Message:   "turn canceled",
 				Retryable: false,
 			}
 		})
